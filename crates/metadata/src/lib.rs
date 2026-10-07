@@ -8,8 +8,13 @@ pub mod bytes;
 pub mod cli;
 pub mod error;
 pub mod heaps;
+pub mod model;
 pub mod pe;
+pub mod reader;
 pub mod sig;
 pub mod tables;
 
 pub use error::{Error, Result};
+pub use model::{Cell, MetadataModel, Row};
+pub use reader::read_assembly;
+pub use tables::TableId;
