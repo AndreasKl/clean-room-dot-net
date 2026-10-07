@@ -7,6 +7,7 @@ pub mod body;
 pub mod bytes;
 pub mod error;
 pub mod heaps;
+pub mod sig;
 pub mod tables;
 
 pub use error::{Error, Result};
