@@ -5,5 +5,6 @@
 
 pub mod bytes;
 pub mod error;
+pub mod tables;
 
 pub use error::{Error, Result};
