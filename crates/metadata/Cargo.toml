@@ -1,0 +1,7 @@
+[package]
+name = "metadata"
+version = "0.1.0"
+edition = "2024"
+description = "ECMA-335 metadata: PE/CLI image reader and writer"
+
+[dependencies]
