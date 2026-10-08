@@ -13,8 +13,10 @@ pub mod pe;
 pub mod reader;
 pub mod sig;
 pub mod tables;
+pub mod writer;
 
 pub use error::{Error, Result};
 pub use model::{Cell, MetadataModel, Row};
 pub use reader::read_assembly;
 pub use tables::TableId;
+pub use writer::{ImageKind, write_assembly};
