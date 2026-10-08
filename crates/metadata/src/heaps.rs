@@ -109,12 +109,27 @@ pub fn read_user_strings(data: &[u8]) -> Result<Vec<Vec<u16>>> {
             )));
         }
         let bytes = r.bytes(len)?;
-        entries.push(
-            bytes[..len - 1]
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                .collect(),
-        );
+        let units: Vec<u16> = bytes[..len - 1]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        // `MetadataModel` recomputes offsets from canonical entry sizes, so a
+        // non-minimal length prefix would make later tokens resolve wrongly.
+        if r.pos() - start != user_string_entry_size(units.len()) {
+            return Err(Error::Unsupported(format!(
+                "non-canonical #US encoding at {start:#x} (non-minimal length prefix)"
+            )));
+        }
+        entries.push(units);
+    }
+    // Only up to 3 zero bytes of 4-byte alignment padding may follow the
+    // terminating zero length byte (§II.24.2.4).
+    let tail = r.pos();
+    let rest = &data[tail.min(data.len())..];
+    if rest.len() > 3 || rest.iter().any(|&b| b != 0) {
+        return Err(Error::Unsupported(format!(
+            "non-canonical #US encoding: unexpected data after terminator at {tail:#x}"
+        )));
     }
     Ok(entries)
 }
@@ -267,6 +282,27 @@ mod tests {
 
     fn utf16(s: &str) -> Vec<u16> {
         s.encode_utf16().collect()
+    }
+
+    #[test]
+    fn user_strings_reject_non_canonical_encodings() {
+        // Non-minimal (2-byte) length prefix for a 3-byte entry.
+        let probe = [0, 0x80, 0x03, b'A', 0, 0, 0x03, b'B', 0, 0];
+        assert!(matches!(
+            read_user_strings(&probe),
+            Err(Error::Unsupported(_))
+        ));
+        // Non-zero data after the zero-length terminator.
+        let trailing = [0, 0x03, b'A', 0, 0, 0, 0x05, 0];
+        assert!(matches!(
+            read_user_strings(&trailing),
+            Err(Error::Unsupported(_))
+        ));
+        // More than 3 padding bytes.
+        assert!(read_user_strings(&[0, 0, 0, 0, 0, 0]).is_err());
+        // Canonical heap with padding still reads.
+        let ok = read_user_strings(&[0, 0x03, b'A', 0, 0, 0, 0, 0]).unwrap();
+        assert_eq!(ok, vec![vec![0x41u16]]);
     }
 
     #[test]
