@@ -11,6 +11,13 @@ const FAT_HEADER_DWORDS: u16 = 3;
 const SECT_FAT_FORMAT: u8 = 0x40;
 const SECT_MORE_SECTS: u8 = 0x80;
 
+/// A decoded method body (§II.25.4).
+///
+/// The tiny header format has no max-stack field: §II.25.4.2 implies a max
+/// stack of 8. A body that qualifies as tiny (see [`MethodBody::is_tiny`]) is
+/// therefore always written tiny, and re-reads with `max_stack == 8` whatever
+/// its original value. Use [`MethodBody::normalized`] to compare a body with
+/// its write/read round trip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodBody {
     pub max_stack: u16,
@@ -99,6 +106,10 @@ impl MethodBody {
         })
     }
 
+    /// Whether this body is written with the tiny header (§II.25.4.2): code
+    /// under 64 bytes, no locals, no extra sections, and `max_stack <= 8`.
+    /// The tiny format cannot store a max stack and implies 8, so encoding a
+    /// tiny body with a smaller `max_stack` is lossy; see [`MethodBody::normalized`].
     pub fn is_tiny(&self) -> bool {
         self.code.len() < 64
             && self.max_stack <= 8
@@ -107,6 +118,19 @@ impl MethodBody {
             && self.extra_sections.is_empty()
     }
 
+    /// The body as it reads back after [`MethodBody::encode`]: identical,
+    /// except that a tiny body gets `max_stack = 8` (§II.25.4.2).
+    pub fn normalized(&self) -> MethodBody {
+        let mut body = self.clone();
+        if body.is_tiny() {
+            body.max_stack = 8;
+        }
+        body
+    }
+
+    /// Encodes the tiny header (§II.25.4.2) when [`MethodBody::is_tiny`], else
+    /// the fat header (§II.25.4.3). The tiny form drops `max_stack`; it reads
+    /// back as 8.
     pub fn encode(&self) -> Vec<u8> {
         let mut w = ByteWriter::new();
         if self.is_tiny() {
@@ -152,6 +176,32 @@ mod tests {
         assert_eq!(body.code, &TINY[1..]);
         assert!(body.is_tiny());
         assert_eq!(body.encode(), TINY);
+    }
+
+    #[test]
+    fn tiny_encoding_normalizes_max_stack_to_8() {
+        let body = MethodBody {
+            max_stack: 1,
+            init_locals: false,
+            local_var_sig_token: 0,
+            code: vec![0x2A],
+            extra_sections: Vec::new(),
+        };
+        assert!(body.is_tiny());
+        let bytes = body.encode();
+        assert_eq!(bytes, [0x06, 0x2A], "tiny header");
+        let parsed = MethodBody::parse(&bytes).unwrap();
+        assert_eq!(parsed.max_stack, 8);
+        assert_ne!(parsed, body);
+        assert_eq!(parsed, body.normalized());
+        assert_eq!(body.normalized().max_stack, 8);
+        // A body that needs the fat format is left untouched.
+        let fat = MethodBody {
+            max_stack: 1,
+            init_locals: true,
+            ..body
+        };
+        assert_eq!(fat.normalized(), fat);
     }
 
     #[test]
