@@ -7,7 +7,7 @@ use crate::model::{Cell, MetadataModel, Row};
 use crate::pe::DataDirectory;
 use crate::tables::{
     ColumnKind, HEAP_WIDE_BLOB, HEAP_WIDE_GUID, HEAP_WIDE_STRINGS, IndexSizes, TABLE_COUNT,
-    TableId, columns,
+    TableId, columns, ref_in_range,
 };
 use crate::{Error, Result};
 
@@ -206,7 +206,7 @@ fn raw_value(
         (ColumnKind::Guid, Cell::Guid(g)) => heaps.guids.add(*g),
         (ColumnKind::Table(target), Cell::Ref(t, row)) if *t == target => {
             // List columns may point one past the last row.
-            if *row > counts[target.index()] + 1 {
+            if !ref_in_range(kind, target, *row, counts) {
                 return Err(Error::Malformed(format!(
                     "{target:?} row {row} is out of range"
                 )));
@@ -214,7 +214,7 @@ fn raw_value(
             *row
         }
         (ColumnKind::Coded(c), Cell::Ref(t, row)) => {
-            if *row > counts[t.index()] {
+            if !ref_in_range(kind, *t, *row, counts) {
                 return Err(Error::Malformed(format!("{t:?} row {row} is out of range")));
             }
             c.encode(*t, *row)?

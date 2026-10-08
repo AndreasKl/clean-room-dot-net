@@ -258,6 +258,25 @@ pub enum ColumnKind {
     MethodRva,
 }
 
+/// Whether a reference to `row` of `target` is valid in a column of `kind`,
+/// given per-table row counts. Coded indexes (§II.24.2.6) must name an
+/// existing row; simple Table columns may also point one past the end because
+/// list columns (e.g. `TypeDef.FieldList`) delimit a run by the next row.
+/// Non-reference column kinds are never in range.
+pub fn ref_in_range(
+    kind: ColumnKind,
+    target: TableId,
+    row: u32,
+    counts: &[u32; TABLE_COUNT],
+) -> bool {
+    let count = counts[target.index()];
+    match kind {
+        ColumnKind::Table(_) => row <= count.saturating_add(1),
+        ColumnKind::Coded(_) => row <= count,
+        _ => false,
+    }
+}
+
 /// Column layout of every table (§II.22.2–§II.22.39). `Constant.Type` is a
 /// byte followed by a padding byte and is modelled as `U16`.
 pub fn columns(table: TableId) -> &'static [ColumnKind] {

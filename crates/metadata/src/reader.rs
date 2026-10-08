@@ -6,7 +6,7 @@ use crate::cli::{CLI_HEADER_SIZE, CliHeader};
 use crate::heaps::{BlobHeap, GuidHeap, StringHeap, read_user_strings};
 use crate::model::{Cell, MetadataModel, Row};
 use crate::pe::PeImage;
-use crate::tables::{ColumnKind, IndexSizes, TABLE_COUNT, TableId, columns};
+use crate::tables::{ColumnKind, IndexSizes, TABLE_COUNT, TableId, columns, ref_in_range};
 use crate::{Error, Result};
 
 const METADATA_SIGNATURE: u32 = 0x424A_5342; // "BSJB"
@@ -36,6 +36,8 @@ pub fn read_assembly(data: &[u8]) -> Result<MetadataModel> {
         let body = pe.slice_from(rva).and_then(MethodBody::parse);
         body.map_err(|e| Error::BadImage(format!("method body at RVA {rva:#x}: {e}")))
     })?;
+    validate_refs(&tables)?;
+    validate_entry_point(cli.entry_point_token, &tables)?;
 
     Ok(MetadataModel {
         version: root.version,
@@ -44,6 +46,45 @@ pub fn read_assembly(data: &[u8]) -> Result<MetadataModel> {
         tables,
         user_strings,
     })
+}
+
+/// Rejects any cross-table reference that points outside its target table, so
+/// consumers can index `table(t)[row - 1]` without panicking. Uses the same
+/// rule as the writer (`ref_in_range`).
+fn validate_refs(tables: &[Vec<Row>]) -> Result<()> {
+    let mut counts = [0u32; TABLE_COUNT];
+    for t in TableId::ALL {
+        counts[t.index()] = tables[t.index()].len() as u32;
+    }
+    for table in TableId::ALL {
+        for (i, row) in tables[table.index()].iter().enumerate() {
+            for (&kind, cell) in columns(table).iter().zip(row) {
+                if let Cell::Ref(t, r) = cell
+                    && !ref_in_range(kind, *t, *r, &counts)
+                {
+                    return Err(Error::BadImage(format!(
+                        "{table:?} row {}: reference to {t:?} row {r} is out of range",
+                        i + 1
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// §II.25.3.3: the entry point is 0 or a MethodDef token (table 0x06).
+fn validate_entry_point(token: u32, tables: &[Vec<Row>]) -> Result<()> {
+    let row = (token & 0x00FF_FFFF) as usize;
+    let in_range = token == 0
+        || (token >> 24 == 0x06 && (1..=tables[TableId::MethodDef.index()].len()).contains(&row));
+    if in_range {
+        Ok(())
+    } else {
+        Err(Error::BadImage(format!(
+            "entry point token {token:#010x} does not name an existing MethodDef"
+        )))
+    }
 }
 
 struct MetadataRoot<'a> {
@@ -180,4 +221,31 @@ fn cell(
         }
         ColumnKind::MethodRva => Cell::Body(if raw == 0 { None } else { Some(body_at(raw)?) }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HELLO: &[u8] = include_bytes!("../tests/fixtures/hello.exe");
+
+    #[test]
+    fn out_of_range_references_are_bad_image() {
+        let m = read_assembly(HELLO).unwrap();
+        let mut tables = m.tables.clone();
+        assert!(validate_refs(&tables).is_ok());
+
+        // Coded index past the end of the target table.
+        tables[TableId::MemberRef.index()][0][0] = Cell::Ref(TableId::TypeRef, 999);
+        assert!(matches!(validate_refs(&tables), Err(Error::BadImage(_))));
+
+        // Simple list column: one past the end is allowed, two is not.
+        let mut tables = m.tables.clone();
+        let fields = tables[TableId::Field.index()].len() as u32;
+        let td = &mut tables[TableId::TypeDef.index()][0];
+        td[4] = Cell::Ref(TableId::Field, fields + 1);
+        assert!(validate_refs(&tables).is_ok());
+        tables[TableId::TypeDef.index()][0][4] = Cell::Ref(TableId::Field, fields + 2);
+        assert!(matches!(validate_refs(&tables), Err(Error::BadImage(_))));
+    }
 }

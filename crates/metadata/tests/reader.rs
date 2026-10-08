@@ -164,3 +164,38 @@ fn reads_mono_mscorlib() {
     assert!(type_def(&m, "System", "Console").is_some());
     assert!(m.table(TableId::TypeDef).len() > 1000);
 }
+
+fn hello_with_entry(token: u32) -> Vec<u8> {
+    // CLI header at RVA 0x2008 -> file offset 0x208; entry point token at +20.
+    let mut image = HELLO.to_vec();
+    image[0x21C..0x220].copy_from_slice(&token.to_le_bytes());
+    image
+}
+
+#[test]
+fn entry_point_must_name_an_existing_method_def() {
+    assert_eq!(
+        read_assembly(&hello_with_entry(0x0600_0001))
+            .unwrap()
+            .entry_point_token,
+        0x0600_0001
+    );
+    for bad in [
+        0x0600_0063,
+        0x0600_0000 | 0xFF_FFFF,
+        0x0200_0001,
+        0x7000_0001,
+    ] {
+        assert!(
+            matches!(
+                read_assembly(&hello_with_entry(bad)),
+                Err(metadata::Error::BadImage(_))
+            ),
+            "entry point {bad:#x} must be rejected"
+        );
+    }
+    assert!(
+        read_assembly(&hello_with_entry(0)).is_ok(),
+        "0 = no entry point"
+    );
+}
