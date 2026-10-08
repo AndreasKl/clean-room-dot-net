@@ -34,7 +34,6 @@ const LEAF_SORTED: &[(TableId, usize)] = &[
     (TableId::Constant, 1),
     (TableId::CustomAttribute, 0),
     (TableId::FieldMarshal, 0),
-    (TableId::DeclSecurity, 1),
     (TableId::ClassLayout, 2),
     (TableId::FieldLayout, 1),
     (TableId::MethodSemantics, 2),
@@ -47,6 +46,7 @@ const LEAF_SORTED: &[(TableId, usize)] = &[
 /// Sorted tables that other rows refer to: reordering would break those
 /// references, so they must arrive sorted.
 const REFERENCED_SORTED: &[(TableId, usize)] = &[
+    (TableId::DeclSecurity, 1),
     (TableId::InterfaceImpl, 0),
     (TableId::GenericParam, 2),
     (TableId::GenericParamConstraint, 0),

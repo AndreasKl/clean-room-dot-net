@@ -201,3 +201,26 @@ fn mono_runs_hello_with_wide_indexes() {
         );
     }
 }
+
+#[test]
+fn unsorted_decl_security_is_unsupported() {
+    let row = |t: u32| {
+        vec![
+            Cell::U16(0),
+            Cell::Ref(TableId::TypeDef, t),
+            Cell::Blob(vec![1]),
+        ]
+    };
+    let mut m = read_assembly(HELLO).unwrap();
+    m.table_mut(TableId::DeclSecurity).push(row(2));
+    m.table_mut(TableId::DeclSecurity).push(row(1));
+    assert!(matches!(
+        write_assembly(&m, ImageKind::Exe),
+        Err(Error::Unsupported(_))
+    ));
+
+    let mut sorted = read_assembly(HELLO).unwrap();
+    sorted.table_mut(TableId::DeclSecurity).push(row(1));
+    sorted.table_mut(TableId::DeclSecurity).push(row(2));
+    assert_eq!(round_trip(&sorted, ImageKind::Exe), sorted);
+}
