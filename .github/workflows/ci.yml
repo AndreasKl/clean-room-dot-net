@@ -11,8 +11,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Mono (oracle for tests)
         run: sudo apt-get update && sudo apt-get install -y mono-devel
+      - name: Verify Mono oracle is available
+        run: test -f /usr/lib/mono/4.5/mscorlib.dll && mono --version
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --all --check
-      - run: cargo test --workspace
+      - name: Test (no test may be ignored)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee test.log
+          ! grep -E '[1-9][0-9]* ignored' test.log
