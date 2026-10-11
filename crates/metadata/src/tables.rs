@@ -347,6 +347,77 @@ pub fn columns(table: TableId) -> &'static [ColumnKind] {
     }
 }
 
+/// Column positions within rows, matching `columns()` (§II.22). Use these
+/// instead of bare indexes.
+pub mod col {
+    /// §II.22.30
+    pub mod module {
+        pub const GENERATION: usize = 0;
+        pub const NAME: usize = 1;
+        pub const MVID: usize = 2;
+    }
+
+    /// §II.22.38
+    pub mod type_ref {
+        pub const RESOLUTION_SCOPE: usize = 0;
+        pub const NAME: usize = 1;
+        pub const NAMESPACE: usize = 2;
+    }
+
+    /// §II.22.37
+    pub mod type_def {
+        pub const FLAGS: usize = 0;
+        pub const NAME: usize = 1;
+        pub const NAMESPACE: usize = 2;
+        pub const EXTENDS: usize = 3;
+        pub const FIELD_LIST: usize = 4;
+        pub const METHOD_LIST: usize = 5;
+    }
+
+    /// §II.22.26; `BODY` is the RVA column, decoded to a method body.
+    pub mod method_def {
+        pub const BODY: usize = 0;
+        pub const IMPL_FLAGS: usize = 1;
+        pub const FLAGS: usize = 2;
+        pub const NAME: usize = 3;
+        pub const SIGNATURE: usize = 4;
+        pub const PARAM_LIST: usize = 5;
+    }
+
+    /// §II.22.25
+    pub mod member_ref {
+        pub const CLASS: usize = 0;
+        pub const NAME: usize = 1;
+        pub const SIGNATURE: usize = 2;
+    }
+
+    /// §II.22.2
+    pub mod assembly {
+        pub const HASH_ALG_ID: usize = 0;
+        pub const MAJOR_VERSION: usize = 1;
+        pub const MINOR_VERSION: usize = 2;
+        pub const BUILD_NUMBER: usize = 3;
+        pub const REVISION_NUMBER: usize = 4;
+        pub const FLAGS: usize = 5;
+        pub const PUBLIC_KEY: usize = 6;
+        pub const NAME: usize = 7;
+        pub const CULTURE: usize = 8;
+    }
+
+    /// §II.22.5
+    pub mod assembly_ref {
+        pub const MAJOR_VERSION: usize = 0;
+        pub const MINOR_VERSION: usize = 1;
+        pub const BUILD_NUMBER: usize = 2;
+        pub const REVISION_NUMBER: usize = 3;
+        pub const FLAGS: usize = 4;
+        pub const PUBLIC_KEY_OR_TOKEN: usize = 5;
+        pub const NAME: usize = 6;
+        pub const CULTURE: usize = 7;
+        pub const HASH_VALUE: usize = 8;
+    }
+}
+
 /// Byte widths of heap and table indexes for one `#~` stream (§II.24.2.6).
 #[derive(Debug, Clone)]
 pub struct IndexSizes {
@@ -526,6 +597,97 @@ mod tests {
                 .encode(TableId::MethodDef, 1)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn column_constants_match_schema() {
+        use ColumnKind as K;
+        let check = |t: TableId, c: usize, k: ColumnKind| {
+            assert_eq!(columns(t)[c], k, "{t:?} column {c}");
+        };
+        check(TableId::Module, col::module::GENERATION, K::U16);
+        check(TableId::Module, col::module::NAME, K::Str);
+        check(TableId::Module, col::module::MVID, K::Guid);
+        check(
+            TableId::TypeRef,
+            col::type_ref::RESOLUTION_SCOPE,
+            K::Coded(CodedIndex::ResolutionScope),
+        );
+        check(TableId::TypeRef, col::type_ref::NAME, K::Str);
+        check(TableId::TypeRef, col::type_ref::NAMESPACE, K::Str);
+        check(TableId::TypeDef, col::type_def::FLAGS, K::U32);
+        check(TableId::TypeDef, col::type_def::NAME, K::Str);
+        check(TableId::TypeDef, col::type_def::NAMESPACE, K::Str);
+        check(
+            TableId::TypeDef,
+            col::type_def::EXTENDS,
+            K::Coded(CodedIndex::TypeDefOrRef),
+        );
+        check(
+            TableId::TypeDef,
+            col::type_def::FIELD_LIST,
+            K::Table(TableId::Field),
+        );
+        check(
+            TableId::TypeDef,
+            col::type_def::METHOD_LIST,
+            K::Table(TableId::MethodDef),
+        );
+        check(TableId::MethodDef, col::method_def::BODY, K::MethodRva);
+        check(TableId::MethodDef, col::method_def::IMPL_FLAGS, K::U16);
+        check(TableId::MethodDef, col::method_def::FLAGS, K::U16);
+        check(TableId::MethodDef, col::method_def::NAME, K::Str);
+        check(TableId::MethodDef, col::method_def::SIGNATURE, K::Blob);
+        check(
+            TableId::MethodDef,
+            col::method_def::PARAM_LIST,
+            K::Table(TableId::Param),
+        );
+        check(
+            TableId::MemberRef,
+            col::member_ref::CLASS,
+            K::Coded(CodedIndex::MemberRefParent),
+        );
+        check(TableId::MemberRef, col::member_ref::NAME, K::Str);
+        check(TableId::MemberRef, col::member_ref::SIGNATURE, K::Blob);
+        check(TableId::Assembly, col::assembly::HASH_ALG_ID, K::U32);
+        check(TableId::Assembly, col::assembly::MAJOR_VERSION, K::U16);
+        check(TableId::Assembly, col::assembly::MINOR_VERSION, K::U16);
+        check(TableId::Assembly, col::assembly::BUILD_NUMBER, K::U16);
+        check(TableId::Assembly, col::assembly::REVISION_NUMBER, K::U16);
+        check(TableId::Assembly, col::assembly::FLAGS, K::U32);
+        check(TableId::Assembly, col::assembly::PUBLIC_KEY, K::Blob);
+        check(TableId::Assembly, col::assembly::NAME, K::Str);
+        check(TableId::Assembly, col::assembly::CULTURE, K::Str);
+        check(
+            TableId::AssemblyRef,
+            col::assembly_ref::MAJOR_VERSION,
+            K::U16,
+        );
+        check(
+            TableId::AssemblyRef,
+            col::assembly_ref::MINOR_VERSION,
+            K::U16,
+        );
+        check(
+            TableId::AssemblyRef,
+            col::assembly_ref::BUILD_NUMBER,
+            K::U16,
+        );
+        check(
+            TableId::AssemblyRef,
+            col::assembly_ref::REVISION_NUMBER,
+            K::U16,
+        );
+        check(TableId::AssemblyRef, col::assembly_ref::FLAGS, K::U32);
+        check(
+            TableId::AssemblyRef,
+            col::assembly_ref::PUBLIC_KEY_OR_TOKEN,
+            K::Blob,
+        );
+        check(TableId::AssemblyRef, col::assembly_ref::NAME, K::Str);
+        check(TableId::AssemblyRef, col::assembly_ref::CULTURE, K::Str);
+        check(TableId::AssemblyRef, col::assembly_ref::HASH_VALUE, K::Blob);
     }
 
     #[test]
