@@ -1,0 +1,8 @@
+[package]
+name = "clr"
+version = "0.1.0"
+edition = "2024"
+description = "Runs CLI assemblies on the clean-room runtime"
+
+[dependencies]
+runtime = { path = "../runtime" }

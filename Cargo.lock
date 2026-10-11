@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "clr"
+version = "0.1.0"
+dependencies = [
+ "runtime",
+]
+
+[[package]]
 name = "metadata"
 version = "0.1.0"
 
