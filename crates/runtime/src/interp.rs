@@ -28,7 +28,8 @@ struct Frame {
     ip: usize,
     args: Vec<StackValue>,
     stack: Vec<StackValue>,
-    returns_value: bool,
+    /// Declared return type, checked by `ret`.
+    ret: TypeSig,
 }
 
 impl Frame {
@@ -69,6 +70,45 @@ impl Frame {
         self.args.get(index).copied().ok_or_else(|| {
             RuntimeError::invalid_program(format!("argument {index} does not exist"))
         })
+    }
+}
+
+/// §III.1.1: whether `value` is a legal stack representation of `ty`;
+/// `None` for types that are not checked yet.
+fn kind_matches(ty: &TypeSig, value: &StackValue) -> Option<bool> {
+    let expected = match ty {
+        TypeSig::Boolean
+        | TypeSig::Char
+        | TypeSig::I1
+        | TypeSig::U1
+        | TypeSig::I2
+        | TypeSig::U2
+        | TypeSig::I4
+        | TypeSig::U4 => "int32",
+        TypeSig::I8 | TypeSig::U8 => "int64",
+        TypeSig::R4 | TypeSig::R8 => "F",
+        TypeSig::I | TypeSig::U | TypeSig::Ptr(_) | TypeSig::FnPtr(_) => "native int",
+        TypeSig::String
+        | TypeSig::Object
+        | TypeSig::Class(_)
+        | TypeSig::SzArray(_)
+        | TypeSig::Array { .. }
+        | TypeSig::GenericInst {
+            value_type: false, ..
+        } => "O",
+        TypeSig::Modified { ty, .. } => return kind_matches(ty, value),
+        _ => return None,
+    };
+    Some(kind_name(value) == expected)
+}
+
+fn kind_name(value: &StackValue) -> &'static str {
+    match value {
+        StackValue::I32(_) => "int32",
+        StackValue::I64(_) => "int64",
+        StackValue::F64(_) => "F",
+        StackValue::NativeInt(_) => "native int",
+        StackValue::Obj(_) => "O",
     }
 }
 
@@ -127,7 +167,7 @@ impl<'o> Interpreter<'o> {
                 methods::method_key(&self.asms, main)?
             )));
         }
-        self.push_frame(main, main_args, sig.ret != TypeSig::Void)?;
+        self.push_frame(main, main_args, sig.ret)?;
         let result = self.execute()?;
         self.out
             .flush()
@@ -300,6 +340,15 @@ impl<'o> Interpreter<'o> {
             )));
         }
         let args = self.top().stack.split_off(available - argc);
+        for (i, (ty, value)) in sig.params.iter().zip(&args).enumerate() {
+            if kind_matches(ty, value) == Some(false) {
+                return Err(RuntimeError::invalid_program(format!(
+                    "argument {i} of {} has the wrong type: expected {ty:?}, found {}",
+                    methods::method_name(&self.asms, callee)?,
+                    kind_name(value)
+                )));
+            }
+        }
         let has_body = self
             .asms
             .get(callee.asm)
@@ -307,7 +356,7 @@ impl<'o> Interpreter<'o> {
             .as_body()
             .is_some();
         if has_body {
-            return self.push_frame(callee, args, sig.ret != TypeSig::Void);
+            return self.push_frame(callee, args, sig.ret);
         }
         let key = methods::method_key(&self.asms, callee)?;
         if callee.asm != self.asms.corlib() {
@@ -329,12 +378,7 @@ impl<'o> Interpreter<'o> {
         Ok(())
     }
 
-    fn push_frame(
-        &mut self,
-        method: MethodId,
-        args: Vec<StackValue>,
-        returns_value: bool,
-    ) -> Result<()> {
+    fn push_frame(&mut self, method: MethodId, args: Vec<StackValue>, ret: TypeSig) -> Result<()> {
         if self.frames.len() >= MAX_FRAMES {
             return Err(RuntimeError::not_implemented(format!(
                 "call depth above {MAX_FRAMES} (stack overflow; exceptions are not supported yet)"
@@ -357,7 +401,7 @@ impl<'o> Interpreter<'o> {
             ip: 0,
             args,
             stack: Vec::new(),
-            returns_value,
+            ret,
         });
         Ok(())
     }
@@ -365,7 +409,7 @@ impl<'o> Interpreter<'o> {
     /// §III.3.56: the evaluation stack must hold exactly the return value.
     fn ret(&mut self) -> Result<Flow> {
         let frame = self.top();
-        let expected = usize::from(frame.returns_value);
+        let expected = usize::from(frame.ret != TypeSig::Void);
         if frame.stack.len() != expected {
             return Err(RuntimeError::invalid_program(format!(
                 "ret with {} values on the stack, expected {expected}",
@@ -373,6 +417,16 @@ impl<'o> Interpreter<'o> {
             )));
         }
         let value = frame.stack.pop();
+        if let Some(v) = &value
+            && kind_matches(&frame.ret, v) == Some(false)
+        {
+            let (ret, method) = (frame.ret.clone(), frame.method);
+            return Err(RuntimeError::invalid_program(format!(
+                "return value of {} has the wrong type: expected {ret:?}, found {}",
+                methods::method_name(&self.asms, method)?,
+                kind_name(v)
+            )));
+        }
         self.frames.pop();
         match self.frames.last_mut() {
             None => Ok(Flow::Exit(value)),
@@ -800,6 +854,57 @@ mod tests {
             err.to_string(),
             "invalid program: argument 1 does not exist in App::Main @IL_0000"
         );
+    }
+
+    #[test]
+    fn int_main_returning_a_reference_is_invalid_program() {
+        let mut b = app();
+        let main = b.method("Main", INT_NO_ARGS, Some(&[LDNULL, RET]));
+        b.entry_point(main);
+        let err = error_of(run(b, &[]).0);
+        assert!(matches!(err, RuntimeError::InvalidProgram { .. }), "{err}");
+        assert_eq!(err.exit_code(), 70);
+        assert!(err.to_string().contains("return value"), "{err}");
+    }
+
+    #[test]
+    fn argument_of_the_wrong_kind_is_invalid_program() {
+        let mut b = app();
+        let main = b.method(
+            "Main",
+            VOID_NO_ARGS,
+            Some(&il(&[
+                &[LDC_I4_0 + 1, CALL],
+                &WRITE_LINE.to_le_bytes(),
+                &[RET],
+            ])),
+        );
+        b.entry_point(main);
+        let err = error_of(run(b, &[]).0);
+        assert!(matches!(err, RuntimeError::InvalidProgram { .. }), "{err}");
+        assert!(err.to_string().contains("argument 0"), "{err}");
+    }
+
+    #[test]
+    fn helper_returning_the_wrong_kind_is_invalid_program() {
+        let mut b = app();
+        // MethodDef 1: string Bad() => 0
+        b.method("Bad", &[0x00, 0x00, 0x0E], Some(&[LDC_I4_0, RET]));
+        let main = b.method(
+            "Main",
+            VOID_NO_ARGS,
+            Some(&il(&[
+                &[CALL],
+                &0x0600_0001u32.to_le_bytes(),
+                &[CALL],
+                &WRITE_LINE.to_le_bytes(),
+                &[RET],
+            ])),
+        );
+        b.entry_point(main);
+        let err = error_of(run(b, &[]).0);
+        assert!(matches!(err, RuntimeError::InvalidProgram { .. }), "{err}");
+        assert!(err.to_string().contains("return value"), "{err}");
     }
 
     #[test]
