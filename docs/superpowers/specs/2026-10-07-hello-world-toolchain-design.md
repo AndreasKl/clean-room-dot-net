@@ -64,6 +64,7 @@ Dependency direction: `csc → compiler → metadata`, `clr → runtime → meta
   with `return <int literal>;`, string literals (regular, with standard escapes),
   integer literals, static method calls with arguments, and `static extern`
   method declarations (no body).
+- **Corlib subset (needed by stage 4):** to compile `corlib/`, the compiler additionally supports `struct`, empty `interface`s, `abstract`/`sealed` modifiers, a base-class clause, empty-bodied instance constructors with parameters, and the assembly attribute `[assembly: System.Reflection.AssemblyVersion("…")]` (which sets the Assembly table version; no CustomAttribute row is needed). These constructs are compiled to metadata only — no instance calls are executed.
 - **IL opcodes:** `nop`, `ldstr`, `call`, `ret`, `ldarg.*`, `ldnull`,
   `ldc.i4.*`. Anything else is added only if `mcs` output for the test programs
   requires it.
@@ -81,7 +82,7 @@ Dependency direction: `csc → compiler → metadata`, `clr → runtime → meta
 ### Out of scope (this milestone)
 
 JIT, real garbage collection, exceptions, generics, boxing, value-type
-instances, instance methods/fields, virtual dispatch, P/Invoke, attributes and
+instances, instance methods/fields, virtual dispatch, P/Invoke, attributes (other than `AssemblyVersion`) and
 enums in source, threading, strong-name verification.
 
 ### Forward-compatibility guardrails
@@ -161,6 +162,7 @@ Single home for all PE/metadata format knowledge.
 | `int Main` completes | — | return value |
 | File missing / not a valid PE / bad metadata | `clr: <path>: <reason>` on stderr | 66 |
 | Unsupported opcode, missing method, missing internal call | `clr: not implemented: <what> in <Type::Method> @IL_xxxx` on stderr | 70 |
+| IL that violates ECMA-335 (stack underflow, wrong value kind, bad token table, …) | clr: invalid program: <what> in <Type::Method> @IL_xxxx on stderr | 70 |
 
 ## 6. Testing
 

@@ -35,6 +35,4 @@ Added on purpose:
   identity `mscorlib, Version=4.0.0.0`.
 - `System.Console.WriteLine(string)` — the only internal call so far.
 
-Keep the source inside the subset our own compiler will handle: classes,
-structs, empty interfaces, `abstract`/`sealed`/`static`, `extern` methods,
-one attribute class with a string constructor.
+Keep the source inside the corlib subset defined in the spec (§4 "Corlib subset"), so our own compiler can build it in stage 4.
