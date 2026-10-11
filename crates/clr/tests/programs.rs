@@ -20,7 +20,7 @@ fn scratch(name: &str) -> PathBuf {
 struct Program {
     name: String,
     source: PathBuf,
-    expected_stdout: String,
+    expected_stdout: Vec<u8>,
     expected_exit: i32,
     /// Substring of stderr; only programs that fail on our runtime have one.
     expected_stderr: Option<String>,
@@ -28,16 +28,32 @@ struct Program {
 
 fn programs() -> Vec<Program> {
     let dir = repo_root().join("tests/programs");
-    let mut list: Vec<Program> = std::fs::read_dir(&dir)
+    let paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .collect();
+    for path in &paths {
+        let ext = path.extension().and_then(|e| e.to_str());
+        assert!(
+            matches!(ext, Some("cs" | "expected" | "exitcode" | "stderr")),
+            "{} must have extension cs, expected, exitcode or stderr",
+            path.display()
+        );
+        assert!(
+            path.with_extension("cs").is_file(),
+            "{} has no .cs sibling with the same name",
+            path.display()
+        );
+    }
+    let mut list: Vec<Program> = paths
+        .into_iter()
         .filter(|path| path.extension().is_some_and(|e| e == "cs"))
         .map(|source| {
             let read = |ext: &str| std::fs::read_to_string(source.with_extension(ext)).ok();
             Program {
                 name: source.file_stem().unwrap().to_string_lossy().into_owned(),
-                expected_stdout: read("expected")
-                    .unwrap_or_else(|| panic!("{} has no .expected file", source.display())),
+                expected_stdout: std::fs::read(source.with_extension("expected"))
+                    .unwrap_or_else(|_| panic!("{} has no .expected file", source.display())),
                 expected_exit: read("exitcode").map_or(0, |s| s.trim().parse().unwrap()),
                 expected_stderr: read("stderr").map(|s| s.trim_end().to_owned()),
                 source,
@@ -106,13 +122,13 @@ fn programs_run_on_clr() {
             .args(PROGRAM_ARGS)
             .output()
             .unwrap();
-        let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
         let name = &program.name;
-        if stdout != program.expected_stdout {
+        if out.stdout != program.expected_stdout {
             failures.push(format!(
-                "{name}: stdout {stdout:?}, expected {:?}",
-                program.expected_stdout
+                "{name}: stdout {:?}, expected {:?}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&program.expected_stdout)
             ));
         }
         if out.status.code() != Some(program.expected_exit) {
@@ -156,10 +172,17 @@ fn expected_files_match_mono() {
             .output()
             .unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&out.stdout),
+            out.stdout,
             program.expected_stdout,
-            "{} on mono",
-            program.name
+            "{} stdout on mono (got {:?})",
+            program.name,
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(
+            out.stderr.is_empty(),
+            "{} wrote to stderr on mono: {:?}",
+            program.name,
+            String::from_utf8_lossy(&out.stderr)
         );
         assert_eq!(
             out.status.code(),
