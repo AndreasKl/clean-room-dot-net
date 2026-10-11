@@ -1,6 +1,7 @@
 //! `clr [-corlib <path>] <assembly.exe> [args...]` — runs a CLI assembly on
 //! the clean-room runtime (spec §5.3, exit codes §5.4).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -15,25 +16,33 @@ struct Options {
     args: Vec<String>,
 }
 
-fn parse_args(args: &[String]) -> Result<Options, String> {
+fn parse_args(args: &[OsString]) -> Result<Options, String> {
     let mut corlib = None;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
-        match arg.as_str() {
-            "-corlib" => {
-                let path = args.get(i + 1).ok_or("-corlib needs a path")?;
-                corlib = Some(PathBuf::from(path));
-                i += 2;
+        if arg == "-corlib" {
+            let path = args.get(i + 1).ok_or("-corlib needs a path")?;
+            corlib = Some(PathBuf::from(path));
+            i += 2;
+        } else if let Some(s) = arg.to_str() {
+            if s.starts_with('-') {
+                return Err(format!("unknown option {s}"));
+            } else {
+                break;
             }
-            option if option.starts_with('-') => return Err(format!("unknown option {option}")),
-            _ => break,
+        } else {
+            // Non-UTF-8 option name (not a recognized option)
+            break;
         }
     }
     let assembly = args.get(i).ok_or("missing assembly path")?;
     Ok(Options {
         corlib,
         assembly: PathBuf::from(assembly),
-        args: args[i + 1..].to_vec(),
+        args: args[i + 1..]
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect(),
     })
 }
 
@@ -43,7 +52,7 @@ fn default_corlib(exe: &Path) -> PathBuf {
 }
 
 fn main() -> ExitCode {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let argv: Vec<OsString> = std::env::args_os().skip(1).collect();
     let options = match parse_args(&argv) {
         Ok(options) => options,
         Err(problem) => {
@@ -77,8 +86,8 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|a| (*a).to_owned()).collect()
+    fn strings(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(|a| OsString::from(*a)).collect()
     }
 
     #[test]
@@ -89,7 +98,7 @@ mod tests {
             Options {
                 corlib: None,
                 assembly: PathBuf::from("app.exe"),
-                args: strings(&["one", "-two"])
+                args: vec!["one".to_owned(), "-two".to_owned()]
             }
         );
     }
@@ -121,5 +130,20 @@ mod tests {
             default_corlib(Path::new("/opt/clr/bin/clr")),
             PathBuf::from("/opt/clr/bin/mscorlib.dll")
         );
+    }
+
+    #[test]
+    fn non_utf8_arguments() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = vec![
+            OsString::from_vec(vec![b'a', 0xFF, b'.', b'e', b'x', b'e']),
+            OsString::from_vec(vec![0xFE]),
+        ];
+        let o = parse_args(&args).unwrap();
+        assert_eq!(
+            o.assembly,
+            PathBuf::from(OsString::from_vec(vec![b'a', 0xFF, b'.', b'e', b'x', b'e']))
+        );
+        assert_eq!(o.args, vec!["\u{FFFD}".to_owned()]);
     }
 }
