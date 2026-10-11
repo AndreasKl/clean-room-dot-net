@@ -5,6 +5,7 @@
 pub mod error;
 pub mod heap;
 pub mod loader;
+pub mod methods;
 pub mod types;
 
 #[cfg(test)]
