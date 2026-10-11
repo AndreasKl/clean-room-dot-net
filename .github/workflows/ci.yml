@@ -12,7 +12,7 @@ jobs:
       - name: Install Mono (oracle for tests)
         run: sudo apt-get update && sudo apt-get install -y mono-devel
       - name: Verify Mono oracle is available
-        run: test -f /usr/lib/mono/4.5/mscorlib.dll && mono --version
+        run: test -f /usr/lib/mono/4.5/mscorlib.dll && mono --version && mcs --version
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt

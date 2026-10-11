@@ -70,11 +70,13 @@ Dependency direction: `csc → compiler → metadata`, `clr → runtime → meta
 - **Metadata tables:** Module, TypeRef, TypeDef, Field, MethodDef, Param,
   MemberRef, CustomAttribute, Assembly, AssemblyRef. Heaps: `#~`, `#Strings`,
   `#US`, `#Blob`, `#GUID`.
-- **Corlib types:** `System.Object`, `System.ValueType`, `System.Void`,
-  `System.String`, `System.Int32`, `System.Console` with
-  `static void WriteLine(string)`. Further types are added only where `mcs
-  -nostdlib` or the reader demonstrably require them (e.g. `System.Array`,
-  `System.Attribute`, `System.Type`); the exact list is an output of stage 2.
+- **Corlib types:** measured in stage 2 — the 33 predefined types
+  `mcs -nostdlib` requires (primitives, `Object`, `ValueType`, `Enum`,
+  `String`, `Array`, `Type`, `Attribute`, `ParamArrayAttribute`,
+  `Delegate`, `MulticastDelegate`, `Exception`, runtime handles,
+  `IDisposable`, `IEnumerator`, `IEnumerable`, `OutAttribute`) plus
+  `AssemblyVersionAttribute` and `System.Console.WriteLine(string)`. The
+  authoritative list and the reasons live in `corlib/README.md`.
 
 ### Out of scope (this milestone)
 
