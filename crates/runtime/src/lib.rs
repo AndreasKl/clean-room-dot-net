@@ -4,6 +4,11 @@
 
 pub mod error;
 pub mod heap;
+pub mod loader;
 pub mod types;
 
+#[cfg(test)]
+mod testing;
+
 pub use error::{Location, Result, RuntimeError};
+pub use loader::{Assemblies, AssemblyId, LoadedAssembly};
