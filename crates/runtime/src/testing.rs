@@ -184,3 +184,28 @@ pub fn app() -> ModelBuilder {
     b.type_def("", "App", Cell::Ref(TableId::TypeRef, object));
     b
 }
+
+/// Runs `entry` against `corlib`; returns the outcome and captured stdout.
+pub fn run_with(
+    corlib: LoadedAssembly,
+    entry: ModelBuilder,
+    args: &[&str],
+) -> (crate::Result<i32>, String) {
+    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    let mut out = Vec::new();
+    let result = crate::run(corlib, entry.build(), &args, &mut out);
+    (
+        result,
+        String::from_utf8(out).expect("program output is UTF-8"),
+    )
+}
+
+/// Runs `entry` against `test_corlib()`.
+pub fn run(entry: ModelBuilder, args: &[&str]) -> (crate::Result<i32>, String) {
+    run_with(test_corlib(), entry, args)
+}
+
+/// Concatenates IL fragments, e.g. `il(&[&[LDSTR], &token.to_le_bytes()])`.
+pub fn il(parts: &[&[u8]]) -> Vec<u8> {
+    parts.concat()
+}

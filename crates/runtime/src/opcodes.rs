@@ -219,7 +219,6 @@ pub fn opcode_name(opcode: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opcodes::*;
 
     #[test]
     fn names_of_common_opcodes() {
