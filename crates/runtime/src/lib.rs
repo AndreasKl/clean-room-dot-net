@@ -4,12 +4,16 @@
 
 pub mod error;
 pub mod heap;
+pub mod internal_calls;
 pub mod loader;
 pub mod methods;
+pub mod opcodes;
 pub mod types;
+pub mod value;
 
 #[cfg(test)]
 mod testing;
 
 pub use error::{Location, Result, RuntimeError};
 pub use loader::{Assemblies, AssemblyId, LoadedAssembly};
+pub use value::StackValue;
