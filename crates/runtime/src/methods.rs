@@ -110,11 +110,8 @@ fn render_type(assembly: &LoadedAssembly, t: &TypeSig) -> String {
         T::Class(r) | T::ValueType(r) => type_name(assembly, *r),
         T::SzArray(e) => format!("{}[]", render_type(assembly, e)),
         T::Array { elem, rank, .. } => {
-            format!(
-                "{}[{}]",
-                render_type(assembly, elem),
-                ",".repeat((*rank as usize).saturating_sub(1))
-            )
+            let commas = (*rank as usize).clamp(1, 32) - 1;
+            format!("{}[{}]", render_type(assembly, elem), ",".repeat(commas))
         }
         T::Ptr(e) => format!("{}*", render_type(assembly, e)),
         T::ByRef(e) => format!("{}&", render_type(assembly, e)),
@@ -222,7 +219,12 @@ fn same_type(
     a: (AssemblyId, TypeDefOrRef),
     b: (AssemblyId, TypeDefOrRef),
 ) -> Result<bool> {
-    Ok(type_identity(asms, a.0, a.1)? == type_identity(asms, b.0, b.1)?)
+    let a_id = type_identity(asms, a.0, a.1)?;
+    let b_id = match type_identity(asms, b.0, b.1) {
+        Ok(id) => id,
+        Err(_) => return Ok(false),
+    };
+    Ok(a_id == b_id)
 }
 
 fn sig_matches(
@@ -485,5 +487,76 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.exit_code(), 66);
+    }
+
+    #[test]
+    fn hostile_array_rank_does_not_blow_up() {
+        // Signature with array parameter: rank = 0x1FFFFFFF (huge)
+        // blob: [0x00, 0x01, 0x01, 0x14, 0x08, 0xDF, 0xFF, 0xFF, 0xFF, 0x00, 0x00]
+        // This is decoded as ARRAY(0x14=I4), rank 0x1FFFFFFF
+        let mut corlib = corlib_builder();
+        corlib.method(
+            "BigArray",
+            &[
+                0x00, 0x01, 0x01, 0x14, 0x08, 0xDF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+            ],
+            None,
+        );
+        let asms = Assemblies::new(corlib.build()).unwrap();
+        let big = MethodId {
+            asm: asms.corlib(),
+            row: 2,
+        };
+        let key = method_key(&asms, big).unwrap();
+        // Should render quickly without allocating huge string (clamped to 32)
+        assert!(
+            key.len() < 200,
+            "key too long (not properly clamped): {}",
+            key
+        );
+        assert!(key.contains("BigArray"), "expected method name in key");
+    }
+
+    #[test]
+    fn skips_overload_with_broken_parameter_type() {
+        let mut corlib = corlib_builder();
+
+        // Add a problematic TypeRef that will fail resolution
+        let broken_typeref = corlib.model.push_row(
+            TableId::TypeRef,
+            vec![
+                Cell::Ref(TableId::TypeRef, 1), // self-referencing scope
+                Cell::Str("Broken".into()),
+                Cell::Str(String::new()),
+            ],
+        );
+
+        // First overload: Show(Class(broken TypeRef))
+        let broken_code = ((broken_typeref << 2) | 1) as u8;
+        corlib.method("Show", &[0x00, 0x01, 0x01, 0x12, broken_code], None);
+
+        // Second overload: Show(System.Object) - Class(TypeDef 2)
+        corlib.method("Show", &[0x00, 0x01, 0x01, 0x12, 0x08], None);
+
+        let mut entry = app();
+        // App calls Show(Class(TypeRef 1 = Object))
+        let show = entry.member_ref(
+            Cell::Ref(TableId::TypeRef, 2),
+            "Show",
+            &[0x00, 0x01, 0x01, 0x12, 0x05],
+        );
+
+        let mut asms = Assemblies::new(corlib.build()).unwrap();
+        let app = asms.add(entry.build());
+
+        // Should resolve to the second overload despite the first being broken
+        let result = resolve_member_ref(&asms, app, show).unwrap();
+        let key = method_key(&asms, result).unwrap();
+        // Verify we got the System.Object version, not the broken one
+        assert!(
+            key.contains("System.Object"),
+            "expected System.Object in key, got {}",
+            key
+        );
     }
 }
